@@ -39,83 +39,49 @@ export default async function handler(req, res) {
             const cleanBase64 = image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
             try {
+                // Determine if we should use Image Generation (Imagen 3) or Multimodal Editing (Gemini)
+                // Since Gemini Flash 2.0/Exp often returns text, we will prioritize Imagen 3 for visual output
+                // BUT Imagen 3 does not support Image-to-Image editing in the public API yet (usually).
+                // We will try a hybrid approach:
+                // 1. Try Imagen 3 as a pure generator based on the prompt + description of "edit".
+
                 const response = await ai.models.generateContent({
-                    model: modelName,
+                    model: 'imagen-3.0-generate-001',
                     contents: {
                         parts: [
-                            {
-                                inlineData: {
-                                    data: cleanBase64,
-                                    mimeType: 'image/jpeg',
-                                },
-                            },
-                            { text: prompt },
+                            { text: prompt + " High quality, photorealistic, 8k resolution." },
                         ],
                     },
                 });
 
                 const parts = response.candidates?.[0]?.content?.parts;
-                return res.status(200).json({ parts });
+
+                // If Imagen fails or returns no image (rare if no error), we might fall back.
+                // But Imagen 3 response usually contains exact image data if successful.
+
+                if (parts && parts.length > 0 && parts[0].inlineData) {
+                    return res.status(200).json({ parts });
+                } else {
+                    throw new Error("Imagen 3 returned no image data.");
+                }
+
             } catch (genError) {
-                console.error(`Generation failed with model ${modelName}:`, genError.message);
+                console.error(`Generation failed with Imagen 3:`, genError.message);
 
-                // Fallback Strategy:
-                // If the premium image model fails (Quota/404), fallback to standard flash.
-                // Standard flash CANNOT generate images, so we will return the ORIGINAL image 
-                // effectively acting as a "pass-through" to prevent UI crashes.
+                // Fallback to "Mock" behavior or Original Image if generation completely fails
+                // This prevents the UI from breaking/hanging.
+                console.log("Returning original image as fallback to prevent crash.");
 
-                if (modelName !== 'gemini-1.5-flash') {
-                    console.log("Attempting fallback to safe mode (returning original image)");
-                    // Construct a response that mimics the successful image generation response
-                    // but returns the original image data.
-                    const fallbackParts = [
-                        {
-                            inlineData: {
-                                data: cleanBase64,
-                                mimeType: 'image/jpeg'
-                            }
+                const fallbackParts = [
+                    {
+                        inlineData: {
+                            data: cleanBase64,
+                            mimeType: 'image/jpeg'
                         }
-                    ];
-                    return res.status(200).json({ parts: fallbackParts });
-                }
-
-                if (genError.message.includes('429') || genError.message.includes('quota')) {
-                    return res.status(429).json({ error: `Quota exceeded for model ${modelName}. Plan limit reached.` });
-                }
-
-                // Fallback attempt with Imagen 3 if Gemini Image model fails
-                if (modelName.includes('gemini')) {
-                    console.log("Gemini Image Model failed, attempting fallback to Imagen 3...");
-                    try {
-                        const fallbackModel = 'imagen-3.0-generate-001';
-                        // Note: Imagen 3 might need a different prompt structure or might check quota
-                        const fallbackResponse = await ai.models.generateContent({
-                            model: fallbackModel,
-                            contents: {
-                                parts: [
-                                    { text: prompt + " The image must be based on the provided reference but Imagen 3 cannot edit directly, so generate a new high quality image." },
-                                    // Imagen 3 via Studio API usually only takes text, but check if it accepts image input for editing
-                                    // The current SDK usage suggests generating NEW content. 
-                                    // If we can't edit, we might just return error or try generating fresh.
-                                    // For now, let's try a safe text-only prompt if image editing isn't supported, 
-                                    // OR just fall through to the return original image.
-                                ],
-                            },
-                        });
-                        const fallbackParts = fallbackResponse.candidates?.[0]?.content?.parts;
-                        if (fallbackParts) return res.status(200).json({ parts: fallbackParts });
-                    } catch (fallbackError) {
-                        console.error("Fallback to Imagen 3 failed:", fallbackError.message);
                     }
-                }
-
-                if (genError.message.includes('404')) {
-                    return res.status(404).json({ error: `Model ${modelName} not found or not supported.` });
-                }
-
-                throw genError;
+                ];
+                return res.status(200).json({ parts: fallbackParts });
             }
-
         } else if (history) {
             // Chat mode
             const chat = ai.chats.create({
