@@ -30,7 +30,8 @@ const generateSingleView = async (
     });
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `API Error: ${response.statusText}`);
     }
 
     const data = await response.json();

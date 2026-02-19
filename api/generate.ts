@@ -100,19 +100,17 @@ export default async function handler(req, res) {
             } catch (genError) {
                 console.error(`Generation failed:`, genError.message);
 
-                // Fallback to Original Image if generation completely fails
-                // This prevents the UI from breaking/hanging.
-                console.log("Returning original image as fallback to prevent crash.");
+                // Check for Quota Exceeded (429) specifically
+                if (genError.message && (genError.message.includes("429") || genError.message.includes("Quota"))) {
+                    return res.status(429).json({
+                        error: "Image Generation Quota Exceeded. The 'Nano Banana' model requires a billing-enabled Google Cloud Project (it is not free tier eligible). Please enable billing."
+                    });
+                }
 
-                const fallbackParts = [
-                    {
-                        inlineData: {
-                            data: cleanBase64,
-                            mimeType: 'image/jpeg'
-                        }
-                    }
-                ];
-                return res.status(200).json({ parts: fallbackParts });
+                // For other errors, return 500 with message
+                return res.status(500).json({
+                    error: `Image Generation Failed: ${genError.message}.`
+                });
             }
         } else if (history) {
             // Chat mode
