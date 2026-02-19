@@ -533,7 +533,7 @@ export default function App() {
         <ChatBot userRole="CUSTOMER" userName={user.name} />
 
         <div className="absolute bottom-1 right-2 pointer-events-none text-[10px] text-brand-300 opacity-60">
-          v0.0.1
+          v0.0.2 (Nano Banana)
         </div>
       </main>
     </div>
