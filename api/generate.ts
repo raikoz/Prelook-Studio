@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     try {
         const { prompt, image, model, history, systemInstruction } = req.body;
 
-        // User provided fallback key - removed as it was invalid/leaked or wrong type.
+        // User provided fallback key
         // We now STRICTLY rely on the environment variable to ensure the user provides a fresh, valid key.
         const apiKey = process.env.GEMINI_API_KEY;
 
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
         }
 
         const ai = new GoogleGenAI({ apiKey });
-        // Default text model
+        // Default text model to a safer version
         const modelName = model || 'gemini-1.5-flash';
 
         if (image) {
@@ -40,10 +40,11 @@ export default async function handler(req, res) {
             const cleanBase64 = image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
             try {
-                // Step 1: Analyze the original image using Gemini 1.5 Flash to get a description
+                // Step 1: Analyze the original image using Gemini 2.5 Flash to get a description
+                // We use 2.5 because 1.5 was reported missing/404 for this key.
                 console.log("Analyzing original image for features...");
 
-                const analysisModel = 'gemini-1.5-flash';
+                const analysisModel = 'gemini-2.5-flash';
                 const analysisResponse = await ai.models.generateContent({
                     model: analysisModel,
                     contents: {
@@ -62,12 +63,12 @@ export default async function handler(req, res) {
                 const personDescription = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
                 console.log("Analysis complete. Description length:", personDescription.length);
 
-                // Step 2: Generate the new image using "Nano Banana" (Gemini 2.0 Flash)
-                // We use Gemini 2.0 Flash Exp because Imagen 3 is currently unavailable for this key/tier.
+                // Step 2: Generate the new image using "Nano Banana" (nano-banana-pro-preview)
+                // This simulates 'editing' by regenerating the person with the new style using the user's specific requested model.
                 const finalPrompt = `Generate a photorealistic 8k portrait based on this description: ${personDescription}. The person is now sporting a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture, 8k resolution. Return ONLY the image.`;
-                console.log("Generating new style with combined prompt using Gemini 2.0 Flash...");
+                console.log("Generating new style using nano-banana-pro-preview...");
 
-                const genModel = 'gemini-2.0-flash-exp';
+                const genModel = 'nano-banana-pro-preview';
 
                 const response = await ai.models.generateContent({
                     model: genModel,
@@ -80,20 +81,20 @@ export default async function handler(req, res) {
 
                 const parts = response.candidates?.[0]?.content?.parts;
 
-                // Gemini 2.0 might return text if it refuses, or image if successful.
+                // The 'Nano Banana' model should return an image.
                 const imagePart = parts?.find(p => p.inlineData);
 
                 if (imagePart) {
                     // Ensure we return it in the format frontend expects (array of parts)
                     return res.status(200).json({ parts: [imagePart] });
                 } else {
-                    console.log("Gemini 2.0 returned no inlineData. Candidates:", JSON.stringify(response.candidates));
+                    console.log("Nano Banana returned no inlineData. Candidates:", JSON.stringify(response.candidates));
                     // Check if it returned text saying it can't generate
                     const textPart = parts?.find(p => p.text);
                     if (textPart) {
                         console.log("Model response text:", textPart.text);
                     }
-                    throw new Error("Model returned no image data (likely refusal or text output).");
+                    throw new Error("Model returned no image data.");
                 }
 
             } catch (genError) {

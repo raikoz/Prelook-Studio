@@ -2,7 +2,7 @@
 const { GoogleGenAI } = require("@google/genai");
 
 // The key provided by the user
-const apiKey = "AIzaSyBYf2S5FRXs5pIPrIxOtlPqNIQbykgYcl8";
+const apiKey = "AIzaSyCLNKIDW1AutzDmUJlVsR9NwjIau5syS-g";
 const ai = new GoogleGenAI({ apiKey });
 
 async function verifyModels() {
@@ -14,7 +14,8 @@ async function verifyModels() {
     await new Promise(resolve => setTimeout(resolve, 20000));
 
     const modelsToTest = [
-        "gemini-2.0-flash",
+        "nano-banana-pro-preview",
+        "gemini-2.5-flash",
     ];
 
     for (const model of modelsToTest) {
