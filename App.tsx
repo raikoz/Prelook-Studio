@@ -21,7 +21,7 @@ export default function App() {
   const [view, setView] = useState<AppView>(AppView.LANDING);
   const [previousView, setPreviousView] = useState<AppView>(AppView.LANDING); // Track to return after payment
   const [user, setUser] = useState<User | null>(null);
-  
+
   // Payment State
   const [pendingPaymentItem, setPendingPaymentItem] = useState<PaymentItem | null>(null);
 
@@ -56,33 +56,33 @@ export default function App() {
 
     // Flow 1: Partner/Region Login
     if (type === 'PARTNER' || type === 'REGION') {
-        // In a real app, 'code' here would be the Salon/Region ID/Key validation
-        const isValid = (code && code.length > 2) || (loggedInUser.role === type);
-        
-        if (isValid) {
-            setSalonCode(code || (type === 'REGION' ? 'REGION-001' : 'STORE-001')); 
-            setUser(loggedInUser);
-            if (type === 'REGION') {
-                setView(AppView.REGION_DASHBOARD);
-            } else {
-                setView(AppView.SALON_DASHBOARD);
-            }
-            return;
+      // In a real app, 'code' here would be the Salon/Region ID/Key validation
+      const isValid = (code && code.length > 2) || (loggedInUser.role === type);
+
+      if (isValid) {
+        setSalonCode(code || (type === 'REGION' ? 'REGION-001' : 'STORE-001'));
+        setUser(loggedInUser);
+        if (type === 'REGION') {
+          setView(AppView.REGION_DASHBOARD);
+        } else {
+          setView(AppView.SALON_DASHBOARD);
         }
-    } 
-    
+        return;
+      }
+    }
+
     // Flow 2: Customer Login (New User OR Walk-in)
     if (code && code.length > 0 && type === 'CUSTOMER') {
-        // Upgrade user perks for the session if walk-in code provided
-        const upgraded = StorageService.applyWalkInPerks(email);
-        if (upgraded) loggedInUser = upgraded;
+      // Upgrade user perks for the session if walk-in code provided
+      const upgraded = StorageService.applyWalkInPerks(email);
+      if (upgraded) loggedInUser = upgraded;
     }
 
     // Set User & Load History
     setUser(loggedInUser);
     const savedHistory = StorageService.getHistory(email);
     setHistory(savedHistory);
-    
+
     // Customers always go to Landing to generate
     setView(AppView.LANDING);
   };
@@ -94,25 +94,25 @@ export default function App() {
   };
 
   const handleUpdateAvatar = (url: string) => {
-      if (user) {
-          const updatedUser = StorageService.updateAvatar(user.email, url);
-          if (updatedUser) setUser(updatedUser);
-      }
+    if (user) {
+      const updatedUser = StorageService.updateAvatar(user.email, url);
+      if (updatedUser) setUser(updatedUser);
+    }
   };
 
   const handleImageSelect = (base64: string) => {
     setOriginalImage(base64);
     setView(AppView.STUDIO);
-    
+
     // Reset Stack
     setHistoryStack([]);
     setCurrentStackIndex(-1);
-    
-    setGenerationState({ 
-        isLoading: false, 
-        error: null, 
-        resultImages: { front: null, left: null, right: null, back: null },
-        unlockedAngles: false
+
+    setGenerationState({
+      isLoading: false,
+      error: null,
+      resultImages: { front: null, left: null, right: null, back: null },
+      unlockedAngles: false
     });
     setCurrentSessionId(undefined);
   };
@@ -131,7 +131,11 @@ export default function App() {
     try {
       // Step 1: Generate Front Only (Free/Default)
       const results = await generateFrontView(originalImage, prompt);
-      
+
+      if (!results.front) {
+        throw new Error("Failed to generate image. Please try again.");
+      }
+
       const newStack = historyStack.slice(0, currentStackIndex + 1);
       newStack.push(results);
       setHistoryStack(newStack);
@@ -146,23 +150,26 @@ export default function App() {
         config,
         unlockedAngles: false
       };
-      
+
       setHistory(prev => [newSession, ...prev]);
       StorageService.saveHistorySession(user.email, newSession);
-      
+
       // Deduct 1 Credit for generation
       const newCredits = user.credits - 1;
       StorageService.updateCredits(user.email, newCredits);
       setUser(prev => prev ? ({ ...prev, credits: newCredits }) : null);
 
       setCurrentSessionId(newSession.id);
-      
+
       setGenerationState({
         isLoading: false,
         error: null,
         resultImages: results,
         unlockedAngles: false
       });
+
+      // Force view to studio to ensure user sees the result immediately
+      setView(AppView.STUDIO);
     } catch (err: any) {
       setGenerationState(prev => ({
         ...prev,
@@ -174,61 +181,65 @@ export default function App() {
 
   const handleUnlock360 = async () => {
     if (!originalImage || !user || !currentSessionId || !lastConfig) return;
-    
+
     // Check credits (Upsell cost: 2 credits)
     if (user.credits < 2) {
-        setView(AppView.PRICING);
-        return;
+      setView(AppView.PRICING);
+      return;
     }
 
     setGenerationState(prev => ({ ...prev, isUnlocking: true, error: null }));
 
     try {
-        // Construct prompt again
-        let colorPrompt = "";
-        if (lastConfig.color !== 'Keep Natural') {
-             colorPrompt = `Dye hair color ${lastConfig.color}.`;
-        } else {
-             colorPrompt = "Keep original hair color.";
-        }
-        const prompt = `A ${lastConfig.gender} hairstyle. ${lastConfig.style} cut. ${colorPrompt} Professional salon look.`;
+      // Construct prompt again
+      let colorPrompt = "";
+      if (lastConfig.color !== 'Keep Natural') {
+        colorPrompt = `Dye hair color ${lastConfig.color}.`;
+      } else {
+        colorPrompt = "Keep original hair color.";
+      }
+      const prompt = `A ${lastConfig.gender} hairstyle. ${lastConfig.style} cut. ${colorPrompt} Professional salon look.`;
 
-        const remainingViews = await generateRemainingViews(originalImage, prompt);
-        
-        const fullResults: GeneratedImages = {
-            ...generationState.resultImages,
-            left: remainingViews.left || null,
-            right: remainingViews.right || null,
-            back: remainingViews.back || null
-        };
+      const remainingViews = await generateRemainingViews(originalImage, prompt);
 
-        // Update Session
-        const currentSession = history.find(s => s.id === currentSessionId);
-        if (currentSession) {
-            currentSession.resultImages = fullResults;
-            currentSession.unlockedAngles = true;
-            StorageService.saveHistorySession(user.email, currentSession);
-            setHistory(StorageService.getHistory(user.email)); // Refresh
-        }
+      if (!remainingViews.left && !remainingViews.right && !remainingViews.back) {
+        throw new Error("Failed to unlock 360 views. Please try again.");
+      }
 
-        // Deduct Credits
-        const newCredits = user.credits - 2;
-        StorageService.updateCredits(user.email, newCredits);
-        setUser(prev => prev ? ({ ...prev, credits: newCredits }) : null);
+      const fullResults: GeneratedImages = {
+        ...generationState.resultImages,
+        left: remainingViews.left || null,
+        right: remainingViews.right || null,
+        back: remainingViews.back || null
+      };
 
-        setGenerationState(prev => ({
-            ...prev,
-            isUnlocking: false,
-            resultImages: fullResults,
-            unlockedAngles: true
-        }));
+      // Update Session
+      const currentSession = history.find(s => s.id === currentSessionId);
+      if (currentSession) {
+        currentSession.resultImages = fullResults;
+        currentSession.unlockedAngles = true;
+        StorageService.saveHistorySession(user.email, currentSession);
+        setHistory(StorageService.getHistory(user.email)); // Refresh
+      }
+
+      // Deduct Credits
+      const newCredits = user.credits - 2;
+      StorageService.updateCredits(user.email, newCredits);
+      setUser(prev => prev ? ({ ...prev, credits: newCredits }) : null);
+
+      setGenerationState(prev => ({
+        ...prev,
+        isUnlocking: false,
+        resultImages: fullResults,
+        unlockedAngles: true
+      }));
 
     } catch (err: any) {
-        setGenerationState(prev => ({
-            ...prev,
-            isUnlocking: false,
-            error: "Failed to unlock views. Credits not deducted.",
-        }));
+      setGenerationState(prev => ({
+        ...prev,
+        isUnlocking: false,
+        error: "Failed to unlock views. Credits not deducted.",
+      }));
     }
   };
 
@@ -252,10 +263,10 @@ export default function App() {
     setOriginalImage(session.originalImage);
     setLastConfig(session.config);
     setGenerationState({
-        isLoading: false,
-        error: null,
-        resultImages: session.resultImages,
-        unlockedAngles: session.unlockedAngles
+      isLoading: false,
+      error: null,
+      resultImages: session.resultImages,
+      unlockedAngles: session.unlockedAngles
     });
     setHistoryStack([session.resultImages]);
     setCurrentStackIndex(0);
@@ -268,57 +279,57 @@ export default function App() {
     setOriginalImage(null);
     setHistoryStack([]);
     setCurrentStackIndex(-1);
-    setGenerationState({ 
-        isLoading: false, 
-        error: null, 
-        resultImages: { front: null, left: null, right: null, back: null },
-        unlockedAngles: false
+    setGenerationState({
+      isLoading: false,
+      error: null,
+      resultImages: { front: null, left: null, right: null, back: null },
+      unlockedAngles: false
     });
   };
 
   // Payment Logic
   const initiatePayment = (item: PaymentItem) => {
-      setPendingPaymentItem(item);
-      setPreviousView(view);
-      setView(AppView.PAYMENT);
+    setPendingPaymentItem(item);
+    setPreviousView(view);
+    setView(AppView.PAYMENT);
   };
 
   const handlePaymentSuccess = () => {
-      if (user && pendingPaymentItem) {
-          let updatedUser = { ...user };
-          
-          if (pendingPaymentItem.type === 'TIER' && pendingPaymentItem.tierId) {
-              const u = StorageService.upgradeTier(user.email, pendingPaymentItem.tierId);
-              if (u) updatedUser = u;
-          } else if (pendingPaymentItem.type === 'CREDITS' && pendingPaymentItem.creditsValue) {
-              const newCredits = user.credits + pendingPaymentItem.creditsValue;
-              StorageService.updateCredits(user.email, newCredits);
-              updatedUser.credits = newCredits;
-          } else if (pendingPaymentItem.type === 'FUND') {
-              // Just visual confirmation for fund in this demo, usually would update a different wallet
-              // But we can add credits to the user object to simulate balance update
-              alert(`Successfully deposited ₹${pendingPaymentItem.price} to Franchise Fund.`);
-          }
-          
-          setUser(updatedUser);
-          setPendingPaymentItem(null);
-          setView(previousView === AppView.PRICING ? AppView.STUDIO : previousView);
+    if (user && pendingPaymentItem) {
+      let updatedUser = { ...user };
+
+      if (pendingPaymentItem.type === 'TIER' && pendingPaymentItem.tierId) {
+        const u = StorageService.upgradeTier(user.email, pendingPaymentItem.tierId);
+        if (u) updatedUser = u;
+      } else if (pendingPaymentItem.type === 'CREDITS' && pendingPaymentItem.creditsValue) {
+        const newCredits = user.credits + pendingPaymentItem.creditsValue;
+        StorageService.updateCredits(user.email, newCredits);
+        updatedUser.credits = newCredits;
+      } else if (pendingPaymentItem.type === 'FUND') {
+        // Just visual confirmation for fund in this demo, usually would update a different wallet
+        // But we can add credits to the user object to simulate balance update
+        alert(`Successfully deposited ₹${pendingPaymentItem.price} to Franchise Fund.`);
       }
+
+      setUser(updatedUser);
+      setPendingPaymentItem(null);
+      setView(previousView === AppView.PRICING ? AppView.STUDIO : previousView);
+    }
   };
 
   // Render Logic
   if (!user) {
     return (
       <div className="min-h-screen bg-brand-50 font-sans text-brand-900">
-         <header className="bg-white/80 backdrop-blur-md border-b border-brand-100 sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <header className="bg-white/80 backdrop-blur-md border-b border-brand-100 sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
-                <div className="bg-brand-900 text-white p-2 rounded-lg">
+              <div className="bg-brand-900 text-white p-2 rounded-lg">
                 <Scissors className="w-5 h-5" />
-                </div>
-                <span className="font-serif text-2xl font-bold tracking-tight text-brand-900">Prelook Studio</span>
+              </div>
+              <span className="font-serif text-2xl font-bold tracking-tight text-brand-900">Prelook Studio</span>
             </div>
-            </div>
+          </div>
         </header>
         <LoginScreen onLogin={handleLogin} />
         <div className="absolute inset-0 z-0 opacity-10 bg-[url('https://images.unsplash.com/photo-1560066984-138dadb4c035?q=80&w=2574&auto=format&fit=crop')] bg-cover bg-center"></div>
@@ -328,32 +339,32 @@ export default function App() {
 
   // Payment View
   if (view === AppView.PAYMENT && pendingPaymentItem) {
-      return (
-          <PaymentScreen 
-            item={pendingPaymentItem} 
-            onBack={() => setView(previousView)}
-            onSuccess={handlePaymentSuccess}
-          />
-      );
+    return (
+      <PaymentScreen
+        item={pendingPaymentItem}
+        onBack={() => setView(previousView)}
+        onSuccess={handlePaymentSuccess}
+      />
+    );
   }
 
   // Region Admin View
   if (view === AppView.REGION_DASHBOARD) {
     return (
-        <>
-            <RegionDashboard user={user} onLogout={handleLogout} onTopUp={initiatePayment} />
-            <ChatBot userRole="REGION" userName={user.name} />
-        </>
+      <>
+        <RegionDashboard user={user} onLogout={handleLogout} onTopUp={initiatePayment} />
+        <ChatBot userRole="REGION" userName={user.name} />
+      </>
     );
   }
 
   // Salon Admin View
   if (view === AppView.SALON_DASHBOARD && salonCode) {
     return (
-        <>
-            <SalonDashboard user={user} salonCode={salonCode} onLogout={handleLogout} onTopUp={initiatePayment} />
-            <ChatBot userRole="PARTNER" userName={user.name} />
-        </>
+      <>
+        <SalonDashboard user={user} salonCode={salonCode} onLogout={handleLogout} onTopUp={initiatePayment} />
+        <ChatBot userRole="PARTNER" userName={user.name} />
+      </>
     );
   }
 
@@ -362,7 +373,7 @@ export default function App() {
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-md border-b border-brand-100 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          
+
           {/* Logo - Left */}
           <div className="flex items-center gap-3 cursor-pointer group flex-shrink-0" onClick={() => setView(AppView.LANDING)}>
             <div className="bg-brand-900 text-white p-2 rounded-lg transition-transform group-hover:rotate-6 shadow-md">
@@ -370,44 +381,44 @@ export default function App() {
             </div>
             <span className="font-serif text-2xl font-bold tracking-tight text-brand-900 hidden sm:block">Prelook Studio</span>
           </div>
-          
+
           {/* Center - Music Player */}
           <div className="absolute left-1/2 transform -translate-x-1/2">
-             <MusicPlayer />
+            <MusicPlayer />
           </div>
 
           {/* Right Controls */}
           <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
-             {/* Credits Badge */}
-             <div onClick={() => setView(AppView.PRICING)} className="cursor-pointer bg-brand-100 hover:bg-brand-200 px-3 py-1 rounded-full flex items-center gap-2 transition-colors">
-                <div className="bg-brand-900 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">
-                    {user.credits}
-                </div>
-                <span className="text-xs font-bold uppercase text-brand-800 tracking-wider hidden sm:inline">Credits</span>
-             </div>
+            {/* Credits Badge */}
+            <div onClick={() => setView(AppView.PRICING)} className="cursor-pointer bg-brand-100 hover:bg-brand-200 px-3 py-1 rounded-full flex items-center gap-2 transition-colors">
+              <div className="bg-brand-900 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">
+                {user.credits}
+              </div>
+              <span className="text-xs font-bold uppercase text-brand-800 tracking-wider hidden sm:inline">Credits</span>
+            </div>
 
-             <div onClick={() => setView(AppView.DASHBOARD)} className="hidden md:flex items-center gap-3 cursor-pointer hover:opacity-70 border-l border-brand-200 pl-4">
-                <div className="text-right">
-                    <p className="text-xs font-bold uppercase tracking-widest text-brand-900">{user.name}</p>
-                    <div className="flex items-center justify-end gap-1 text-[10px] text-brand-500">
-                       {user.tier === 'PRO' && <Zap className="w-3 h-3 text-yellow-600" fill="currentColor" />}
-                       {user.tier === 'ULTIMATE' && <Crown className="w-3 h-3 text-yellow-600" fill="currentColor" />}
-                       {user.tier === 'FREE' && <Star className="w-3 h-3 text-brand-400" />}
-                       {user.tier} Plan
-                    </div>
+            <div onClick={() => setView(AppView.DASHBOARD)} className="hidden md:flex items-center gap-3 cursor-pointer hover:opacity-70 border-l border-brand-200 pl-4">
+              <div className="text-right">
+                <p className="text-xs font-bold uppercase tracking-widest text-brand-900">{user.name}</p>
+                <div className="flex items-center justify-end gap-1 text-[10px] text-brand-500">
+                  {user.tier === 'PRO' && <Zap className="w-3 h-3 text-yellow-600" fill="currentColor" />}
+                  {user.tier === 'ULTIMATE' && <Crown className="w-3 h-3 text-yellow-600" fill="currentColor" />}
+                  {user.tier === 'FREE' && <Star className="w-3 h-3 text-brand-400" />}
+                  {user.tier} Plan
                 </div>
-                <div className="w-9 h-9 rounded-full border border-brand-200 p-0.5">
-                    <img src={user.avatar} alt="Avatar" className="w-full h-full rounded-full bg-brand-100" />
-                </div>
-             </div>
-             
-             <div onClick={() => setView(AppView.DASHBOARD)} className="md:hidden p-2 text-brand-900">
-                 <UserIcon className="w-5 h-5" />
-             </div>
+              </div>
+              <div className="w-9 h-9 rounded-full border border-brand-200 p-0.5">
+                <img src={user.avatar} alt="Avatar" className="w-full h-full rounded-full bg-brand-100" />
+              </div>
+            </div>
 
-             <button onClick={handleLogout} className="p-2 hover:bg-brand-100 rounded-full text-brand-400 hover:text-brand-900 transition-colors">
-                <LogOut className="w-5 h-5" />
-             </button>
+            <div onClick={() => setView(AppView.DASHBOARD)} className="md:hidden p-2 text-brand-900">
+              <UserIcon className="w-5 h-5" />
+            </div>
+
+            <button onClick={handleLogout} className="p-2 hover:bg-brand-100 rounded-full text-brand-400 hover:text-brand-900 transition-colors">
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
@@ -415,11 +426,11 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col relative">
         {view === AppView.DASHBOARD && (
-            <UserDashboard user={user} onClose={() => setView(AppView.STUDIO)} onTopUp={initiatePayment} />
+          <UserDashboard user={user} onClose={() => setView(AppView.STUDIO)} onTopUp={initiatePayment} />
         )}
 
         {view === AppView.PRICING && (
-           <Pricing onInitiatePayment={initiatePayment} currentTier={user.tier} />
+          <Pricing onInitiatePayment={initiatePayment} currentTier={user.tier} />
         )}
 
         {view === AppView.LANDING && (
@@ -428,12 +439,12 @@ export default function App() {
               <span className="inline-block px-4 py-1.5 rounded-full bg-brand-100 text-brand-600 text-xs font-bold uppercase tracking-widest border border-brand-200">
                 AI Powered Styling
               </span>
-              
+
               <h1 className="font-serif text-6xl md:text-7xl lg:text-8xl text-brand-900 leading-[0.95]">
                 Discover Your<br />
                 <span className="text-brand-500 italic font-light">Perfect Look</span>
               </h1>
-              
+
               <p className="text-lg text-brand-600 max-w-lg mx-auto leading-relaxed">
                 The modern way to visualize your next hairstyle. Instant, photorealistic, and personalized.
               </p>
@@ -442,73 +453,73 @@ export default function App() {
                 <ImageUploader onImageSelect={handleImageSelect} />
               </div>
             </div>
-            
+
             {/* Show recent history on landing if exists */}
             {history.length > 0 && (
-                <div className="mt-12 w-full max-w-7xl px-4">
-                     <h3 className="text-left font-serif text-xl mb-4 text-brand-800">Your Recent Styles</h3>
-                     <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                        {history.slice(0, 6).map(session => (
-                            <div key={session.id} onClick={() => loadSession(session)} className="cursor-pointer group relative aspect-[3/4] rounded-xl overflow-hidden">
-                                <img src={session.resultImages.front || session.originalImage} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
-                            </div>
-                        ))}
-                     </div>
+              <div className="mt-12 w-full max-w-7xl px-4">
+                <h3 className="text-left font-serif text-xl mb-4 text-brand-800">Your Recent Styles</h3>
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                  {history.slice(0, 6).map(session => (
+                    <div key={session.id} onClick={() => loadSession(session)} className="cursor-pointer group relative aspect-[3/4] rounded-xl overflow-hidden">
+                      <img src={session.resultImages.front || session.originalImage} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                      <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
+                    </div>
+                  ))}
                 </div>
+              </div>
             )}
           </div>
         )}
 
         {view === AppView.STUDIO && (
           <div className="flex-1 flex flex-col h-[calc(100vh-64px)] overflow-hidden">
-            
-            <div className="flex flex-1 overflow-hidden">
-                <div className="flex-1 relative md:mr-20"> 
-                     <ResultView 
-                        originalImage={originalImage!}
-                        resultImages={generationState.resultImages}
-                        isLoading={generationState.isLoading}
-                        isUnlocking={generationState.isUnlocking}
-                        unlockedAngles={generationState.unlockedAngles}
-                        onUnlock={handleUnlock360}
-                        currentStyleName={lastConfig?.style}
-                        onBookNow={() => {
-                            // Scroll to Salon Finder
-                            const finder = document.getElementById('salon-finder');
-                            finder?.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                        onSetAvatar={handleUpdateAvatar}
-                    />
-                    
-                    {!generationState.isLoading && generationState.resultImages.front && (
-                        <div id="salon-finder" className="bg-brand-50 border-t border-brand-200 pb-32">
-                            <div className="max-w-7xl mx-auto">
-                                <SalonFinder 
-                                    userEmail={user.email} 
-                                    onBookingComplete={() => setView(AppView.DASHBOARD)}
-                                />
-                            </div>
-                        </div>
-                    )}
-                </div>
 
-                <HistoryBar 
-                    sessions={history} 
-                    onLoadSession={loadSession}
-                    currentSessionId={currentSessionId}
+            <div className="flex flex-1 overflow-hidden">
+              <div className="flex-1 relative md:mr-20">
+                <ResultView
+                  originalImage={originalImage!}
+                  resultImages={generationState.resultImages}
+                  isLoading={generationState.isLoading}
+                  isUnlocking={generationState.isUnlocking}
+                  unlockedAngles={generationState.unlockedAngles}
+                  onUnlock={handleUnlock360}
+                  currentStyleName={lastConfig?.style}
+                  onBookNow={() => {
+                    // Scroll to Salon Finder
+                    const finder = document.getElementById('salon-finder');
+                    finder?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  onSetAvatar={handleUpdateAvatar}
                 />
+
+                {!generationState.isLoading && generationState.resultImages.front && (
+                  <div id="salon-finder" className="bg-brand-50 border-t border-brand-200 pb-32">
+                    <div className="max-w-7xl mx-auto">
+                      <SalonFinder
+                        userEmail={user.email}
+                        onBookingComplete={() => setView(AppView.DASHBOARD)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <HistoryBar
+                sessions={history}
+                onLoadSession={loadSession}
+                currentSessionId={currentSessionId}
+              />
             </div>
-            
+
             {generationState.error && (
-               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 text-red-600 px-6 py-3 rounded-full shadow-lg border border-red-100 text-sm flex items-center gap-2 animate-fade-in">
-                 <Info className="w-4 h-4" />
-                 {generationState.error}
-               </div>
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 text-red-600 px-6 py-3 rounded-full shadow-lg border border-red-100 text-sm flex items-center gap-2 animate-fade-in">
+                <Info className="w-4 h-4" />
+                {generationState.error}
+              </div>
             )}
 
-            <Controls 
-              onGenerate={handleGenerate} 
+            <Controls
+              onGenerate={handleGenerate}
               isLoading={generationState.isLoading || generationState.isUnlocking || false}
               onUndo={handleUndo}
               onRedo={handleRedo}
@@ -517,9 +528,13 @@ export default function App() {
             />
           </div>
         )}
-        
+
         {/* Chatbot for Customers */}
         <ChatBot userRole="CUSTOMER" userName={user.name} />
+
+        <div className="absolute bottom-1 right-2 pointer-events-none text-[10px] text-brand-300 opacity-60">
+          v0.0.1
+        </div>
       </main>
     </div>
   );
