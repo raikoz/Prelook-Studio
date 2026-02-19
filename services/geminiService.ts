@@ -13,13 +13,9 @@ const generateSingleView = async (
 ): Promise<string | null> => {
   try {
     // Refined prompt to support highlighting
-    const fullPrompt = `Edit this image to show a hairstyle transformation. 
-    User Request: ${basePrompt}. 
-    IMPORTANT: Generate the view from the ${viewAngle}. 
-    Maintain the person's facial features, skin tone, and head shape exactly. 
-    Only change the hair. 
-    Style: Photorealistic, 8k resolution, cinematic lighting. 
-    Make it look like a real photograph.`;
+    // Simplified prompt for 2-step backend workflow
+    // The backend will combine this with the analyzed person description.
+    const fullPrompt = `${basePrompt} (View: ${viewAngle})`;
 
     const response = await fetch('/api/generate', {
       method: 'POST',

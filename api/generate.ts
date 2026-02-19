@@ -64,7 +64,7 @@ export default async function handler(req, res) {
 
                 // Step 2: Generate the new image using Imagen 3 with the description + new hairstyle
                 // This simulates 'editing' by regenerating the person with the new style.
-                const finalPrompt = `A photorealistic 8k portrait of ${personDescription}. The person has a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture.`;
+                const finalPrompt = `A photorealistic 8k portrait of ${personDescription}. The person is sporting a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture, 8k resolution.`;
                 console.log("Generating new style with combined prompt...");
 
                 const response = await ai.models.generateContent({
