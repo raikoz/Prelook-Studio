@@ -22,27 +22,27 @@ export default async function handler(req, res) {
     try {
         const { prompt, image, model, history, systemInstruction } = req.body;
 
-        // User provided fallback key
-        const FALLBACK_KEY = "AQ.Ab8RN6KYgjnzEhhrNUuiu36JxcE88RogkcxZfk4RlhrSRTZK7Q";
-        const apiKey = process.env.GEMINI_API_KEY || FALLBACK_KEY;
+        // User provided fallback key - removed as it was invalid/leaked or wrong type.
+        // We now STRICTLY rely on the environment variable to ensure the user provides a fresh, valid key.
+        const apiKey = process.env.GEMINI_API_KEY;
 
         if (!apiKey) {
             console.error("API Key not found in environment variables");
-            return res.status(500).json({ error: 'Server configuration error: Missing API Key' });
+            return res.status(500).json({ error: 'Server configuration error: Missing GEMINI_API_KEY. Please add a valid API Key to your Vercel Environment Variables.' });
         }
 
         const ai = new GoogleGenAI({ apiKey });
+        // Default text model
         const modelName = model || 'gemini-1.5-flash';
 
         if (image) {
-            // Image generation/editing
+            // Image generation/editing using 2-step Description -> Generation workflow
             const cleanBase64 = image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
             try {
                 // Step 1: Analyze the original image using Gemini 1.5 Flash to get a description
                 console.log("Analyzing original image for features...");
 
-                // Use a separate model instance for analysis to ensure we use a vision-capable model
                 const analysisModel = 'gemini-1.5-flash';
                 const analysisResponse = await ai.models.generateContent({
                     model: analysisModel,
@@ -62,13 +62,15 @@ export default async function handler(req, res) {
                 const personDescription = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
                 console.log("Analysis complete. Description length:", personDescription.length);
 
-                // Step 2: Generate the new image using Imagen 3 with the description + new hairstyle
-                // This simulates 'editing' by regenerating the person with the new style.
-                const finalPrompt = `A photorealistic 8k portrait of ${personDescription}. The person is sporting a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture, 8k resolution.`;
-                console.log("Generating new style with combined prompt...");
+                // Step 2: Generate the new image using "Nano Banana" (Gemini 2.0 Flash)
+                // We use Gemini 2.0 Flash Exp because Imagen 3 is currently unavailable for this key/tier.
+                const finalPrompt = `Generate a photorealistic 8k portrait based on this description: ${personDescription}. The person is now sporting a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture, 8k resolution. Return ONLY the image.`;
+                console.log("Generating new style with combined prompt using Gemini 2.0 Flash...");
+
+                const genModel = 'gemini-2.0-flash-exp';
 
                 const response = await ai.models.generateContent({
-                    model: 'imagen-3.0-generate-001',
+                    model: genModel,
                     contents: {
                         parts: [
                             { text: finalPrompt },
@@ -78,19 +80,26 @@ export default async function handler(req, res) {
 
                 const parts = response.candidates?.[0]?.content?.parts;
 
-                if (parts && parts.length > 0 && parts[0].inlineData) {
-                    return res.status(200).json({ parts });
+                // Gemini 2.0 might return text if it refuses, or image if successful.
+                const imagePart = parts?.find(p => p.inlineData);
+
+                if (imagePart) {
+                    // Ensure we return it in the format frontend expects (array of parts)
+                    return res.status(200).json({ parts: [imagePart] });
                 } else {
-                    console.log("Imagen 3 returned no inlineData. Candidates:", JSON.stringify(response.candidates));
-                    throw new Error("Imagen 3 returned no image data.");
+                    console.log("Gemini 2.0 returned no inlineData. Candidates:", JSON.stringify(response.candidates));
+                    // Check if it returned text saying it can't generate
+                    const textPart = parts?.find(p => p.text);
+                    if (textPart) {
+                        console.log("Model response text:", textPart.text);
+                    }
+                    throw new Error("Model returned no image data (likely refusal or text output).");
                 }
 
-
-
             } catch (genError) {
-                console.error(`Generation failed with Imagen 3:`, genError.message);
+                console.error(`Generation failed:`, genError.message);
 
-                // Fallback to "Mock" behavior or Original Image if generation completely fails
+                // Fallback to Original Image if generation completely fails
                 // This prevents the UI from breaking/hanging.
                 console.log("Returning original image as fallback to prevent crash.");
 
@@ -126,7 +135,6 @@ export default async function handler(req, res) {
 
             return res.status(200).json({ text: response.text });
         }
-
     } catch (error) {
         console.error("API Error generating content:", error);
         return res.status(500).json({ error: error.message || 'Error generating content' });
