@@ -39,31 +39,53 @@ export default async function handler(req, res) {
             const cleanBase64 = image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
             try {
-                // Determine if we should use Image Generation (Imagen 3) or Multimodal Editing (Gemini)
-                // Since Gemini Flash 2.0/Exp often returns text, we will prioritize Imagen 3 for visual output
-                // BUT Imagen 3 does not support Image-to-Image editing in the public API yet (usually).
-                // We will try a hybrid approach:
-                // 1. Try Imagen 3 as a pure generator based on the prompt + description of "edit".
+                // Step 1: Analyze the original image using Gemini 1.5 Flash to get a description
+                console.log("Analyzing original image for features...");
+
+                // Use a separate model instance for analysis to ensure we use a vision-capable model
+                const analysisModel = 'gemini-1.5-flash';
+                const analysisResponse = await ai.models.generateContent({
+                    model: analysisModel,
+                    contents: {
+                        parts: [
+                            {
+                                inlineData: {
+                                    data: cleanBase64,
+                                    mimeType: 'image/jpeg'
+                                }
+                            },
+                            { text: "Describe this person's physical appearance in extreme detail for a text-to-image generator prompt. Include: gender, age, ethnicity, exact skin tone, face shape, eye color, facial features, head pose (facing front, left, right?), lighting conditions, background color, and clothing. IMPORTANT: Do NOT describe their hair. Just describe the person." }
+                        ]
+                    }
+                });
+
+                const personDescription = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                console.log("Analysis complete. Description length:", personDescription.length);
+
+                // Step 2: Generate the new image using Imagen 3 with the description + new hairstyle
+                // This simulates 'editing' by regenerating the person with the new style.
+                const finalPrompt = `A photorealistic 8k portrait of ${personDescription}. The person has a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture.`;
+                console.log("Generating new style with combined prompt...");
 
                 const response = await ai.models.generateContent({
                     model: 'imagen-3.0-generate-001',
                     contents: {
                         parts: [
-                            { text: prompt + " High quality, photorealistic, 8k resolution." },
+                            { text: finalPrompt },
                         ],
                     },
                 });
 
                 const parts = response.candidates?.[0]?.content?.parts;
 
-                // If Imagen fails or returns no image (rare if no error), we might fall back.
-                // But Imagen 3 response usually contains exact image data if successful.
-
                 if (parts && parts.length > 0 && parts[0].inlineData) {
                     return res.status(200).json({ parts });
                 } else {
+                    console.log("Imagen 3 returned no inlineData. Candidates:", JSON.stringify(response.candidates));
                     throw new Error("Imagen 3 returned no image data.");
                 }
+
+
 
             } catch (genError) {
                 console.error(`Generation failed with Imagen 3:`, genError.message);
