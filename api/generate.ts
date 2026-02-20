@@ -78,8 +78,12 @@ export default async function handler(req, res) {
 
                 console.log("Fetching from:", imageUrl);
 
-                // Fetch the image buffer
-                const imageRes = await fetch(imageUrl);
+                // Fetch the image buffer with User-Agent to avoid bot blocking
+                const imageRes = await fetch(imageUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                });
 
                 if (!imageRes.ok) {
                     throw new Error(`Pollinations API Error: ${imageRes.statusText}`);
