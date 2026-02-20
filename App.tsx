@@ -419,6 +419,10 @@ export default function App() {
             <button onClick={handleLogout} className="p-2 hover:bg-brand-100 rounded-full text-brand-400 hover:text-brand-900 transition-colors">
               <LogOut className="w-5 h-5" />
             </button>
+
+            <div className="hidden lg:block text-[10px] text-brand-300 ml-2">
+              v0.0.3
+            </div>
           </div>
         </div>
       </header>
@@ -532,9 +536,7 @@ export default function App() {
         {/* Chatbot for Customers */}
         <ChatBot userRole="CUSTOMER" userName={user.name} />
 
-        <div className="absolute bottom-1 right-2 pointer-events-none text-[10px] text-brand-300 opacity-60">
-          v0.0.3 (Pollinations Mode)
-        </div>
+
       </main>
     </div>
   );
