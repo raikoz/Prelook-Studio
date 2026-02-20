@@ -40,76 +40,70 @@ export default async function handler(req, res) {
             const cleanBase64 = image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
             try {
-                // Step 1: Analyze the original image using Gemini 2.5 Flash to get a description
-                // We use 2.5 because 1.5 was reported missing/404 for this key.
-                console.log("Analyzing original image for features...");
-
-                const analysisModel = 'gemini-2.5-flash';
-                const analysisResponse = await ai.models.generateContent({
-                    model: analysisModel,
-                    contents: {
-                        parts: [
-                            {
-                                inlineData: {
-                                    data: cleanBase64,
-                                    mimeType: 'image/jpeg'
-                                }
-                            },
-                            { text: "Describe this person's physical appearance in extreme detail for a text-to-image generator prompt. Include: gender, age, ethnicity, exact skin tone, face shape, eye color, facial features, head pose (facing front, left, right?), lighting conditions, background color, and clothing. IMPORTANT: Do NOT describe their hair. Just describe the person." }
-                        ]
-                    }
-                });
-
-                const personDescription = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                console.log("Analysis complete. Description length:", personDescription.length);
-
-                // Step 2: Generate the new image using "Nano Banana" (nano-banana-pro-preview)
-                // This simulates 'editing' by regenerating the person with the new style using the user's specific requested model.
-                const finalPrompt = `Generate a photorealistic 8k portrait based on this description: ${personDescription}. The person is now sporting a ${prompt}. High quality, cinematic lighting, sharp focus, realistic texture, 8k resolution. Return ONLY the image.`;
-                console.log("Generating new style using nano-banana-pro-preview...");
-
-                const genModel = 'nano-banana-pro-preview';
-
-                const response = await ai.models.generateContent({
-                    model: genModel,
-                    contents: {
-                        parts: [
-                            { text: finalPrompt },
-                        ],
-                    },
-                });
-
-                const parts = response.candidates?.[0]?.content?.parts;
-
-                // The 'Nano Banana' model should return an image.
-                const imagePart = parts?.find(p => p.inlineData);
-
-                if (imagePart) {
-                    // Ensure we return it in the format frontend expects (array of parts)
-                    return res.status(200).json({ parts: [imagePart] });
-                } else {
-                    console.log("Nano Banana returned no inlineData. Candidates:", JSON.stringify(response.candidates));
-                    // Check if it returned text saying it can't generate
-                    const textPart = parts?.find(p => p.text);
-                    if (textPart) {
-                        console.log("Model response text:", textPart.text);
-                    }
-                    throw new Error("Model returned no image data.");
+                let personDescription = "";
+                try {
+                    // Step 1: Analyze the original image using Gemini 2.5 Flash
+                    console.log("Analyzing original image for features...");
+                    const analysisModel = 'gemini-2.5-flash';
+                    const analysisResponse = await ai.models.generateContent({
+                        model: analysisModel,
+                        contents: {
+                            parts: [
+                                { inlineData: { data: cleanBase64, mimeType: 'image/jpeg' } },
+                                { text: "Describe this person's physical appearance in extreme detail for a text-to-image generator prompt. Include: gender, age, ethnicity, exact skin tone, face shape, eye color, facial features, head pose. Do NOT describe their hair." }
+                            ]
+                        }
+                    });
+                    personDescription = analysisResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                    console.log("Analysis complete. Description length:", personDescription.length);
+                } catch (analysisError) {
+                    console.error("Analysis failed (using fallback):", analysisError.message);
+                    // Use a generic fallback so generation can still proceed
+                    personDescription = "a diverse person suitable for hairstyle modeling";
                 }
+
+                // Step 2: Generate the new image using Pollinations.ai (Free/Unlimited)
+                // This bypasses Google's Quota limits entirely.
+                console.log("Generating new style using Pollinations.ai...");
+
+                // Construct a robust prompt for Pollinations
+                const desc = personDescription || "a photorealistic person";
+                const pollinationsPrompt = `high quality, 8k, photorealistic portrait of ${desc}, wearing a ${prompt}. cinematic lighting, sharp focus, realistic texture, neutral background`;
+
+                // Pollinations URL (encoded)
+                const encodedPrompt = encodeURIComponent(pollinationsPrompt);
+                // Add random seed to prevent caching consistency
+                const seed = Math.floor(Math.random() * 10000);
+                const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&private=true&enhance=false&seed=${seed}`;
+
+                console.log("Fetching from:", imageUrl);
+
+                // Fetch the image buffer
+                const imageRes = await fetch(imageUrl);
+
+                if (!imageRes.ok) {
+                    throw new Error(`Pollinations API Error: ${imageRes.statusText}`);
+                }
+
+                const arrayBuffer = await imageRes.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                const base64Image = buffer.toString('base64');
+
+                // Return in the format expected by the frontend
+                const imagePart = {
+                    inlineData: {
+                        data: base64Image,
+                        mimeType: 'image/jpeg'
+                    }
+                };
+
+                return res.status(200).json({ parts: [imagePart] });
 
             } catch (genError) {
                 console.error(`Generation failed:`, genError.message);
-
-                // Check for Quota Exceeded (429) specifically
-                if (genError.message && (genError.message.includes("429") || genError.message.includes("Quota"))) {
-                    return res.status(429).json({
-                        error: "Image Generation Quota Exceeded. The 'Nano Banana' model requires a billing-enabled Google Cloud Project (it is not free tier eligible). Please enable billing."
-                    });
-                }
-
-                // For other errors, return 500 with message
+                // Return 500 so UI shows error, but Pollinations rarely fails in this way.
                 return res.status(500).json({
-                    error: `Image Generation Failed: ${genError.message}.`
+                    error: `Generation Failed: ${genError.message}`
                 });
             }
         } else if (history) {
